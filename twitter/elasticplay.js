@@ -1,4 +1,4 @@
-var redis = require('redis').createClient();
+// var redis = require('redis').createClient();
 
 var esclient = (function() {
     var fork = true;
@@ -12,6 +12,15 @@ var esclient = (function() {
 var es = (function() {
     var opts = {
         host: 'localhost',
+        port: 9200
+    };
+
+    return new (esclient)(opts);
+})();
+// Remote ES
+var remote = (function() {
+    var opts = {
+        host: 'cos',
         port: 9200
     };
 
@@ -116,6 +125,10 @@ var es = (function() {
                         "es_stem_filter": {
                             "type": "stemmer",
                             "name": "minimal_portuguese"
+                        },
+                        "shingles_filter": {
+                            "type": "shingle",
+                            "output_unigrams": false
                         }
                     },
                     "analyzer": {
@@ -127,6 +140,14 @@ var es = (function() {
                                 "icu_folding", 
                                 "icu_normalizer", 
                                 "es_stop_filter"
+                            ]
+                        },
+                        "shinglesAnalyzer": {
+                            "type": "custom",
+                            "tokenizer": "standard",
+                            "char_filter" : [ "remove_punctuation" ],
+                            "filter": [
+                                "shingles_filter"
                             ]
                         }
                     }
@@ -155,19 +176,35 @@ var es = (function() {
                         "type": "date"
                     },
                     "text": {
-                        "type": "string",
-                        "analyzer": "es_tweetAnalyzer",
-                        "store": "yes"
+                        "type": "multi_field",
+                        "fields": {
+                            "text": {
+                                "type": "string",
+                                "index": "not_analyzed"
+                            },
+                            "terms": {
+                                "type": "string",
+                                "index": "analyzed",
+                                "analyzer": "es_tweetAnalyzer",
+                                "store": "yes"
+                            },
+                            "shingles": {
+                                "type": "string",
+                                "index": "analyzed",
+                                "analyzer": "shinglesAnalyzer",
+                                "store": "yes"
+                            }
+                        }
                     }
                 }
             }
         }
     };
 
-    es.deleteIndex('test', createIndex);
+    es.deleteIndex('analysis', createIndex);
 
     function createIndex() {
-        es.createIndex('test', settings)
+        es.createIndex('analysis', settings)
             .on('data', function(data) {
                 console.log(data);
             })
@@ -206,20 +243,21 @@ var es = (function() {
                 text: d._source.text
             };
             bulk = bulk.concat([
-                { index: { _index: 'test', _type: 'message', _id: item.id } },
+                { index: { _index: 'analysis', _type: 'message', _id: item.id } },
                 item
             ]);
         });
 
         if(bulk.length) {
             es.bulk(bulk, function(err, res) {
+                if(count > 250000) return;
                 cb();
             });            
         }    
     }
 
     function scroll(scrollId) {
-        es.scroll(scrollId, '10m', function(err, data) {
+        es.scroll(scrollId, '15m', function(err, data) {
             var hits = JSON.parse(data).hits.hits;
             count += hits.length;
 
@@ -234,11 +272,60 @@ var es = (function() {
         });
     }
 
-    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '10m', size: 100 }, function(err, data) {
+    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '15m', size: 100 }, function(err, data) {
         var scrollId = JSON.parse(data)._scroll_id;
         scroll(scrollId);
     });
-});
+})();
+
+// Export original tweets to remote
+(function exportRawToRemote() {
+    var count = 0;
+
+    setInterval(function() {
+        console.log("COUNT: "+count)
+    }, 60000)
+
+    function save(data, cb) {
+        var bulk = [];
+        data.forEach(function(d) {
+            if(!d._source.id_str) return;
+
+            var item = d._source;
+            bulk = bulk.concat([
+                { index: { _index: 'twitter', _type: 'tweet', _id: item.id_str } },
+                item
+            ]);
+        });
+
+        if(bulk.length) {
+            remote.bulk(bulk, function(err, res) {
+                cb();
+            });   
+        }    
+    }
+
+    function scroll(scrollId) {
+        es.scroll(scrollId, '360m', function(err, data) {
+            var hits = JSON.parse(data).hits.hits;
+            count += hits.length;
+
+            if(hits.length) {
+                save(hits, function() {
+                    scroll(scrollId);
+                });                
+            }
+            else {
+                console.log("TOTAL HITS: "+count);
+            }
+        });
+    }
+
+    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '360m', size: 300 }, function(err, data) {
+        var scrollId = JSON.parse(data)._scroll_id;
+        scroll(scrollId);
+    });
+})();
 
 // Filter Facet
 (function filterFacet() {
@@ -293,7 +380,7 @@ var es = (function() {
             console.log(data);
         });
     }
-})();
+});
 
 // Terms filter
 (function termsFilter() {
@@ -319,84 +406,3 @@ var es = (function() {
 
     }
 });
-
-// Create multi_field for searching, faceting and analysing
-(function multiField() {
-    
-    var settings = {
-        "settings": {
-            "index": {
-                "analysis": {
-                    "char_filter" : {
-                        "remove_punctuation" : {
-                            "type" : "mapping",
-                            "mappings" : [ ".=>-", ",=>-", ";=>-" ]
-                        }
-                    },                    
-                    "filter": {
-                        "es_stop_filter": {
-                            "type": "stop",
-                            "stopwords": [ "_spanish_", "d", "q", "tal" ]
-                        },
-                        "es_stem_filter": {
-                            "type": "stemmer",
-                            "name": "minimal_portuguese"
-                        }
-                    },
-                    "analyzer": {
-                        "es_tweetAnalyzer": {
-                            "type": "custom",
-                            "tokenizer": "icu_tokenizer",
-                            "char_filter" : [ "remove_punctuation" ],
-                            "filter": [
-                                "icu_folding", 
-                                "icu_normalizer", 
-                                "es_stop_filter"
-                            ]
-                        }
-                    }
-                }
-            }
-        },
-        "mappings": {
-            "message": {
-                "_source": {
-                    "enabled": true
-                },
-                "_all": {
-                    "enabled": false
-                },
-                "index.query.default_field": "text",
-                "properties": {
-                    "id": {
-                        "type": "string",
-                        "index": "not_analyzed"
-                    },
-                    "user_id": {
-                        "type": "string",
-                        "index": "not_analyzed"
-                    },
-                    "created_at": {
-                        "type": "date"
-                    },
-                    "text": {
-                        "type": "string",
-                        "analyzer": "es_tweetAnalyzer",
-                        "store": "yes"
-                    }
-                }
-            }
-        }
-    };
-
-    es.deleteIndex('test', createIndex);
-
-    function createIndex() {
-        es.createIndex('test', settings)
-            .on('data', function(data) {
-                console.log(data);
-            })
-            .exec();
-    }
-
-})();
