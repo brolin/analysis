@@ -6,6 +6,14 @@
 var redis = require('redis').createClient();
 var twitter = require('ntwitter');
 
+var esclient = (function() {
+    var fork = true;
+    if(fork) {
+        return require('/Projects/node-elasticsearch-client');
+    }
+    return require('elasticsearchclient');
+})();
+
 // Initialize ES
 var es = (function() {
     var opts = {
@@ -13,7 +21,7 @@ var es = (function() {
         port: 9200
     };
 
-    return new (require('elasticsearchclient'))(opts);    
+    return new (esclient)(opts);
 })();
 
 var accounts = require('./accounts'); // Twitter accounts we're using
@@ -89,7 +97,7 @@ function store(data, q) {
             text: item.text
         };
         bulk = bulk.concat([
-            { index: { _index: 'test', _type: 'message', _id: item.id_str+'' } },
+            { index: { _index: 'analysis', _type: 'message', _id: item.id_str+'' } },
             message
         ]);
 
@@ -116,15 +124,15 @@ function SearchAPI(acc) {
 SearchAPI.prototype.next = function() {
     var delay = windowLapse / rateLimit;
     setTimeout(function() {
-        this.search(terms.shift());
+        var q = terms.shift();
+        this.search(q);
         redis.incrby('pointer', 1);
     }.bind(this), delay);
 };
 
 SearchAPI.prototype.search = function(q) {
-    console.log(q);
     var api = this;
-    this.twitter.search(q, { count: 100 }, function(err, data) {
+    this.twitter.search(q, { language: 'es', count: 100 }, function(err, data) {
         api.next();
 
         if(err || !data) {
@@ -133,8 +141,10 @@ SearchAPI.prototype.search = function(q) {
         }
 
         var n = data.statuses.length;
+        console.log(q);
         console.log(n);
         store(data, q);
         updateHits(q, n);
+        terms.push(q);
     });
 };

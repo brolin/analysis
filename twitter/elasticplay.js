@@ -3,7 +3,7 @@
 var esclient = (function() {
     var fork = true;
     if(fork) {
-        return require('/Users/santiago/Projects/node-elasticsearch-client');
+        return require('/Projects/node-elasticsearch-client');
     }
     return require('elasticsearchclient');
 })();
@@ -18,14 +18,14 @@ var es = (function() {
     return new (esclient)(opts);
 })();
 // Remote ES
-var remote = (function() {
+/*var remote = (function() {
     var opts = {
         host: 'cos',
         port: 9200
     };
 
     return new (esclient)(opts);
-})();
+})();*/
 
 // Match Search
 (function match() {
@@ -65,48 +65,29 @@ var remote = (function() {
         .exec();
 });
 
-// Add Mapping with custom Analyzer
-(function putMapping() {
-    
-    var mapping = {
-        "message": {
-            "_source": {
-                "enabled": true
-            },
-            "_all": {
-                "enabled": false
-            },
-            "index.query.default_field": "text",
-            "properties": {
-                "id": {
-                    "type": "string",
-                    "index": "not_analyzed"
-                },
-                "user_id": {
-                    "type": "string",
-                    "index": "not_analyzed"
-                },
-                "created_at": {
-                    "type": "date"
-                },
-                "text": {
-                    "type": "string",
-                    "analyzer": "es_tweetAnalyzer",
-                    "store": "yes"
-                }
+// Create Analysis Index
+(function createTwitterIndex() {
+    es.deleteIndex('twitter', createIndex);
+
+    var settings = {
+        "settings": {
+            "index": {
+                "index.mapper.dynamic": false
             }
         }
-    };
+    }
 
-    es.putMapping('twitter', 'message', mapping,appings)
-        .on('data', function(data) {
-            console.log(data);
-        })
-        .exec();
-});
+    function createIndex() {
+        es.createIndex('twitter', settings)
+            .on('data', function(data) {
+                console.log(data);
+            })
+            .exec();
+    }
+})();
 
-// Create Index
-(function createIndex() {
+// Create Analysis Index
+(function createAnalysisIndex() {
     var settings = {
         "settings": {
             "index": {
@@ -116,7 +97,7 @@ var remote = (function() {
                             "type" : "mapping",
                             "mappings" : [ ".=>-", ",=>-", ";=>-" ]
                         }
-                    },                    
+                    },
                     "filter": {
                         "es_stop_filter": {
                             "type": "stop",
@@ -147,6 +128,8 @@ var remote = (function() {
                             "tokenizer": "standard",
                             "char_filter" : [ "remove_punctuation" ],
                             "filter": [
+                                "icu_folding", 
+                                "icu_normalizer",
                                 "shingles_filter"
                             ]
                         }
@@ -210,7 +193,7 @@ var remote = (function() {
             })
             .exec();
     }
-});
+})();
 
 // Update Settings
 (function updateSettings() {
@@ -230,10 +213,8 @@ var remote = (function() {
     }
 });
 
-// Use scrolling to export from tweet index to test index
-(function exports() {
-    var count = 0;
 
+(function exports() {
     function save(data, cb) {
         var bulk = [];
         data.forEach(function(d) {
@@ -250,7 +231,6 @@ var remote = (function() {
 
         if(bulk.length) {
             es.bulk(bulk, function(err, res) {
-                if(count > 250000) return;
                 cb();
             });            
         }    
@@ -272,11 +252,11 @@ var remote = (function() {
         });
     }
 
-    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '15m', size: 100 }, function(err, data) {
+    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '15m', size: 300 }, function(err, data) {
         var scrollId = JSON.parse(data)._scroll_id;
         scroll(scrollId);
     });
-})();
+});
 
 // Export original tweets to remote
 (function exportRawToRemote() {
@@ -325,7 +305,7 @@ var remote = (function() {
         var scrollId = JSON.parse(data)._scroll_id;
         scroll(scrollId);
     });
-})();
+});
 
 // Filter Facet
 (function filterFacet() {
@@ -404,5 +384,46 @@ var remote = (function() {
             }
         };
 
+    }
+});
+
+// This will go through result to detect what shingles
+// must be excluded
+(function excludeShinglesByCode() {
+    var back_regex = "(\\s)(\\d+|0|1|2|3|a|c|e|i|o|q|en|yo|tu|ti|tus|ellos|nos|su|sus|por|desde|hacia|hasta|en|al|de|del|el|le|la|lo|las|los|les|con|no|y|t|que|me|para|da|san|mi|mis|un|una|te|es|esa|ese|eso|esos|esta|este|estos|estas|ya|se|como|with|of|for|gt|lt|http|to|be|the|in|on|co|at|you|it|si|ya|va|ser|hay|hacer|ve|sea|muy|ir|ver|hoy|todo|puede|ha|era|soy|vez|otro|otros|mas|sino|tras|pra|uno|cuando|sin|tal|vez|estar|pero|ah|pues)$";
+    var front_regex = "^(\\d+|um|em|pra|a|e|o|yo|ya|al|y|i|de|desde|os|estos|si|se|en|es|and|of|for|my|the|to|at|this|in|is|it|on|with|han|via|con|tu|tus|te|ti|su|sus|un|una|unas|por|me|mi|mis|no|nos|que|del|you|que|este|esta|le|les|lo|mas|para|el|la|las|los|ya|estoy|eu|gt|lt|ha|he|muy|buen|buena|buenos|buenas|sino|san|santa|tras|otro|otros|uno|puede|cada|cuando|vez|ni|estar|pero|ah|pues)(\\s)";
+    var back_matcher = new RegExp(back_regex, "i");
+    var front_matcher = new RegExp(front_regex, "i");
+    
+    var shinglesQuery = function(cb) {
+        redis.smembers('exclude_shingles', function(err, data) {
+            cb({
+                "size": "1000",
+                "query": {
+                    "match_all": {}
+                },
+                "facets": {
+                    "blah": {
+                        "terms": {
+                            "field": "text.shingles",
+                            "size": "1000",
+                            "exclude": data
+                        }
+                    }
+                }
+            });            
+        });
+    };
+
+    search();
+    
+    function search() {
+        shinglesQuery(doSearch);
+        
+        function doSearch(query) {
+            es.search('analysis', 'message', query, function(err, data) {
+                
+            });
+        }
     }
 });

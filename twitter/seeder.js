@@ -2,8 +2,7 @@ var agent = require('superagent');
 var cheerio = require('cheerio');
 var _ = require('underscore');
 var fs = require('fs');
-var engine   = require('../../../../crawler_engine'),
-    utils    = engine.utils;
+var utils   = require('../../crawler_engine/lib/utils');
 
 var redis = require('redis').createClient();
 
@@ -292,7 +291,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
             muni.pop();
 
             var places = JSON.parse(res.text);
-            console.log(places);
+
             var first = places.filter(function(p) {
                 return p.type == 'town';
             }).shift() || places.shift();
@@ -309,4 +308,4 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         });
     }
 
-})();
+});
