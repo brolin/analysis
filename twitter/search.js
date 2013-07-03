@@ -70,6 +70,9 @@ function store(data, q) {
 
     // Store users and tweets in ES
     data.statuses.forEach(function(item) {
+        if(item.lang != 'es')
+            console.log(item.lang);
+            
         if(!item.user) {
             console.log(item);
             return;
@@ -132,7 +135,7 @@ SearchAPI.prototype.next = function() {
 
 SearchAPI.prototype.search = function(q) {
     var api = this;
-    this.twitter.search(q, { language: 'es', count: 100 }, function(err, data) {
+    this.twitter.search(q, { lang: 'es', count: 100 }, function(err, data) {
         api.next();
 
         if(err || !data) {

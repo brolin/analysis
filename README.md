@@ -1,23 +1,53 @@
+Modules
+====================
+
 Terms Analysis
 ====================
 
-monograms
+Features
 ---------------------
 
-bigrams
+### monograms
+Monograms are built from a terms facet:
+
+Analysis is done by es_tweetAnalyzer:
+`https://github.com/santiago/analysis/blob/master/twitter/elasticplay.js#L116`
+
+
+### bigrams
+Bigrams are built from a terms facet:
+
+Analysis is done by 
+`https://github.com/santiago/analysis/blob/master/twitter/elasticplay.js#L126`
+
+
+API
 ---------------------
 
-Now is the time for all good men to come to
-the aid of their country. This is just a
-regular paragraph.
+### GET /terms
 
-The quick brown fox jumped over the lazy
-dog's back.
+### GET /terms/exclude
 
-### Header 3
+### POST /terms/exclude
 
-> This is a blockquote.
-> 
-> This is the second paragraph in the blockquote.
->
-> ## This is an H2 in a blockquote
+### DELETE /terms/exclude
+
+### GET /shingles
+
+### GET /shingles/exclude
+
+### POST /shingles/exclude
+
+### DELETE /shingles/exclude
+
+Elasticsearch
+---------------------
+
+### Indices:
+
+* twitter: tweet, user
+* analysis: message
+
+
+License: CC. 
+Santiago Gaviria

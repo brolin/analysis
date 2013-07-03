@@ -1,4 +1,4 @@
-// var redis = require('redis').createClient();
+ var redis = require('redis').createClient();
 
 var esclient = (function() {
     var fork = true;
@@ -84,7 +84,7 @@ var es = (function() {
             })
             .exec();
     }
-})();
+});
 
 // Create Analysis Index
 (function createAnalysisIndex() {
@@ -193,7 +193,7 @@ var es = (function() {
             })
             .exec();
     }
-})();
+});
 
 // Update Settings
 (function updateSettings() {
@@ -390,7 +390,7 @@ var es = (function() {
 // This will go through result to detect what shingles
 // must be excluded
 (function excludeShinglesByCode() {
-    var back_regex = "(\\s)(\\d+|0|1|2|3|a|c|e|i|o|q|en|yo|tu|ti|tus|ellos|nos|su|sus|por|desde|hacia|hasta|en|al|de|del|el|le|la|lo|las|los|les|con|no|y|t|que|me|para|da|san|mi|mis|un|una|te|es|esa|ese|eso|esos|esta|este|estos|estas|ya|se|como|with|of|for|gt|lt|http|to|be|the|in|on|co|at|you|it|si|ya|va|ser|hay|hacer|ve|sea|muy|ir|ver|hoy|todo|puede|ha|era|soy|vez|otro|otros|mas|sino|tras|pra|uno|cuando|sin|tal|vez|estar|pero|ah|pues)$";
+    var back_regex = "(\\s)(\\d+|0|1|2|3|a|c|e|i|o|q|en|yo|tu|ti|tus|ellos|nos|su|sus|por|desde|hacia|hasta|en|al|de|del|el|le|la|lo|las|los|les|con|no|y|t|que|me|para|da|san|mi|mis|un|una|te|es|esa|ese|eso|esos|esta|este|estos|estas|ya|se|como|with|of|for|gt|lt|http|to|be|the|in|on|co|at|you|it|si|ya|va|ser|hay|hacer|ve|sea|muy|ir|ver|hoy|todo|puede|ha|era|soy|vez|otro|otros|mas|sino|tras|pra|uno|cuando|sin|tal|vez|estar|pero|ah|pues|ni)$";
     var front_regex = "^(\\d+|um|em|pra|a|e|o|yo|ya|al|y|i|de|desde|os|estos|si|se|en|es|and|of|for|my|the|to|at|this|in|is|it|on|with|han|via|con|tu|tus|te|ti|su|sus|un|una|unas|por|me|mi|mis|no|nos|que|del|you|que|este|esta|le|les|lo|mas|para|el|la|las|los|ya|estoy|eu|gt|lt|ha|he|muy|buen|buena|buenos|buenas|sino|san|santa|tras|otro|otros|uno|puede|cada|cuando|vez|ni|estar|pero|ah|pues)(\\s)";
     var back_matcher = new RegExp(back_regex, "i");
     var front_matcher = new RegExp(front_regex, "i");
@@ -422,8 +422,31 @@ var es = (function() {
         
         function doSearch(query) {
             es.search('analysis', 'message', query, function(err, data) {
+                var terms = JSON.parse(data).facets.blah.terms;
                 
+                var exclude_front = terms.map(function(t) {
+                    return t.term;
+                })
+                .filter(function(t) {
+                    return t.match(front_matcher);
+                });
+                
+                var exclude_back = terms.map(function(t) {
+                    return t.term;
+                })
+                .filter(function(t) {
+                    return t.match(back_matcher);
+                });
+                
+                var exclude = exclude_front.concat(exclude_back);
+                redis.sadd('exclude_shingles', exclude, function() {
+                    redis.quit();
+                });
+                
+                console.log(exclude);
+                console.log(exclude.length);
+
             });
         }
     }
-});
+})();
