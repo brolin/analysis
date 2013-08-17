@@ -311,6 +311,24 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
 (function getNocheYNiebla() {
     var departamentos,  clasificaciones, body, currentDepto, cookie, csrf;
 
+    function store(records) {
+        var bulk = [];
+
+        // Store reports in ES
+        records.forEach(function(reporte) {
+            bulk = bulk.concat([
+                { index: { _index: 'nocheyniebla', _type: 'reporte', _id: +'' } },
+                reporte
+            ]);
+        });
+
+        if(bulk.length) {
+            es.bulk(bulk, function(err, res) {
+                // console.log(res);
+            });            
+        }
+    };
+
     function getByDepartamentoAndClasificaciones(clasificacion) {
         var data = {};
         data['evita_csrf'] = 984;
@@ -325,7 +343,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         data['m_ubicacion'] = '1';
         data['m_victimas'] = '1';
         data['m_presponsables'] = '1';
-        data['m_tipificacion:1'] = '1';
+        data['m_tipificacion'] = '1';
         data['_qf_consultaWeb_consulta'] = 'Consulta';
         
         console.log('Consultando ...');
@@ -337,21 +355,47 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
             .set('Cookie', cookie)
             .end(function(error, res){
                 var $ = cheerio.load(res.text);
-                var records = $('table tr').map(function() {
+                var records = $('table tr').map(function MapHTMLTable() {
                     var record = {};
                     var $row = $(this);
-                    $(this).find('td').each(function(i) {
+
+                    $row.find('td').each(function(i) {
                         var field = ['descripcion', 'fecha', 'ubicacion', 'victimas', 'responsable', 'tipificacion'][i];
                         record[field] = $(this).text();
+                        var normalizer = {
+                            responsable: function() {
+                                return record[field].split(',').map(function(t) { return t.trim() });
+                            },
+                            ubicacion: function() {
+                                var _m = record[field].split('/').map(function(t) { 
+                                    return t.toLowerCase().trim();
+                                });
+                                _m.splice(2);
+                                _m.reverse();
+                                return _m.join(',');
+                            },
+                            tipificacion: function() {
+                                return record[field].match(/([A-D]:\d+:\d+)/g);
+                            }
+                        };
+                        if(normalizer[field]) {
+                            record['_'+field] = normalizer[field]();
+                        }
                     });
                     return record;
                 });
-                console.log(records);
+                // The first row is the table's header
+                records.shift();
+                store(records/*, next*/);
+            
             });
-//        next();
     }
 
-    function next() {
+    function next(err) {
+        if(err) {
+            console.log(err);
+        }
+        
         var clasificacion = clasificaciones.shift();
         
         if(!clasificacion) {

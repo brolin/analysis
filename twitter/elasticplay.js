@@ -205,6 +205,123 @@ var es = (function() {
     }
 });
 
+// Create NieblaYNoche Index
+(function createAnalysisIndex() {
+    var settings = {
+        "settings": {
+            "index": {
+                "analysis": {
+                    "char_filter" : {
+                        "remove_punctuation" : {
+                            "type" : "mapping",
+                            "mappings" : [ ".=>-", ",=>-", ";=>-" ]
+                        }
+                    },
+                    "filter": {
+                        "es_stop_filter": {
+                            "type": "stop",
+                            "stopwords": [ "_spanish_", "d", "q", "tal" ]
+                        },
+                        "es_stem_filter": {
+                            "type": "stemmer",
+                            "name": "minimal_portuguese"
+                        },
+                        "shingles_filter": {
+                            "type": "shingle",
+                            "output_unigrams": false
+                        }
+                    },
+                    "analyzer": {
+                        "es_tweetAnalyzer": {
+                            "type": "custom",
+                            "tokenizer": "icu_tokenizer",
+                            "char_filter" : [ "remove_punctuation" ],
+                            "filter": [
+                                "icu_folding", 
+                                "icu_normalizer", 
+                                "es_stop_filter"
+                            ]
+                        },
+                        "shinglesAnalyzer": {
+                            "type": "custom",
+                            "tokenizer": "standard",
+                            "char_filter" : [ "remove_punctuation" ],
+                            "filter": [
+                                "icu_folding", 
+                                "icu_normalizer",
+                                "shingles_filter"
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "reportes": {
+            "message": {
+                "_source": {
+                    "enabled": true
+                },
+                "_all": {
+                    "enabled": false
+                },
+                "index.query.default_field": "descripcion",
+                
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "descripcion": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "fecha": {
+                        "type": "date"
+                    },
+                    "victimas": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "responsable": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "_responsable": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "ubicacion": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "_ubicacion": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "tipificacion": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "_tipificacion": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    }
+                }
+            }
+        }
+    };
+
+    es.deleteIndex('nocheyniebla', createIndex);
+
+    function createIndex() {
+        es.createIndex('nocheyniebla', settings)
+            .on('data', function(data) {
+                console.log(data);
+            })
+            .exec();
+    }
+});
+
 // Update Settings
 (function updateSettings() {
 
