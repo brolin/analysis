@@ -24,47 +24,26 @@ var es = (function() {
     return new (esclient)(opts);
 })();
 
-var accounts = require('./accounts'); // Twitter accounts we're using
+var accounts = [
+    { 
+        consumer_key: 'VVAqxraNlgGbbf4Ip2w',
+        consumer_secret: '9i0QQ5BhEPIF9SXa6g5cyT5d8vAI47cYsI7zbiodco',
+        access_token_key: '1603952870-blAR7Ioqh7MChydAEcFKMfQ142ro56OUTn41yc0',
+        access_token_secret: 'Um2aoo18GaP5Lz8yOtrat69mjkVFYxmPBeXDCjw9Zw' 
+    }
+];
 var terms = [];
 var windowLapse = 15 * 60 * 1000;
-var rateLimit = 180;
+var rateLimit = 15;
 var requestLapse = (windowLapse / rateLimit) / accounts.length;
 
-(function getDictionary() {
-    redis.smembers('dictionary', function(err, data) {
-        redis.get('pointer', function(err, pointer) {
-            terms = data.slice(pointer);
-            run();
-        });
-    });    
-});
-
-(function getLocations() {
-    redis.hgetall('municipios:location', function(err, data) {
-        Object.keys(data).forEach(function(key) {
-            var location = key.split(',');
-//            terms.push({ 
-//                query: location.slice(0,2).join(' '), 
-//                term: key 
-//            });
-            terms.push({
-                query: location[0],
-                term: key,
-                geocode: data[key],
-                radius: '20km'
-            });
-        });
-        run();
-    });
-})();
-
-function run() {
+(function run() {
     accounts.forEach(function(acc, i) {
         setTimeout(function() {
             new SearchAPI(acc);
         }, requestLapse * i);
     });
-}
+})();
 
 function storeEntities(entities) {
     var bulk = [];
@@ -90,7 +69,7 @@ function store(data, q) {
     var bulk = [];
 
     // Store users and tweets in ES
-    data.statuses.forEach(function(item) {
+    data.forEach(function(item) {
         if(item.lang != 'es')
             console.log(item.lang);
             
@@ -99,30 +78,37 @@ function store(data, q) {
             return;
         }
 
+        // The search term we used to find this tweet
+        if(!q) {
+            q = item.user.screen_name;
+        }
+        
         // Index users
         bulk = bulk.concat([
             { index: { _index: 'twitter', _type: 'user', _id: item.user.id_str+'' } },
             item.user
         ]);
         delete item.user;
-        
-        // The search term we used to find this tweet
+
         item.term = q;
         // Index tweets
         bulk = bulk.concat([
             { index: { _index: 'twitter', _type: 'tweet', _id: item.id_str+'' } },
             item
         ]);
-        
-        // Temporarily index to test/message
+
         var message = {
             id: item.id_str,
             created_at: (new Date(item.created_at)).toISOString(),
             text: item.text,
-            term: item.term
+            term: item.term,
+            urls: item.entities.urls.map(function(u) {
+                return u.url;
+            })
         };
+        console.log(message);
         bulk = bulk.concat([
-            { index: { _index: 'geo', _type: 'message', _id: item.id_str+'' } },
+            { index: { _index: 'stream2', _type: 'message', _id: item.id_str+'' } },
             message
         ]);
 
@@ -137,41 +123,22 @@ function store(data, q) {
     }
 }
 
-function updateHits(term, n) {
-    redis.hincrby(term, 'hits', n);
-}
-
 function SearchAPI(acc) {
     this.twitter = new twitter(acc);
-    this.search(terms.shift());
+    this.stream();
 }
 
 SearchAPI.prototype.next = function() {
     var delay = windowLapse / rateLimit;
     setTimeout(function() {
-        var q = terms.shift();
-        this.search(q);
-        redis.incrby('pointer', 1);
+        this.stream();
     }.bind(this), delay);
 };
 
-SearchAPI.prototype.search = function(q) {
-    if(typeof q == 'object') {
-        // It's Geo search
-        if(q.geocode) {
-            this.geoSearch(q);
-        } else {
-            this.termSearch(q);
-        }
-    } else {
-        this.next();
-    }
-};
-
-SearchAPI.prototype.termSearch = function(q) {
+SearchAPI.prototype.stream = function() {
     var api = this;
 
-    this.twitter.search(q.query, { lang: 'es', count: 100 }, function(err, data) {
+    this.twitter.getHomeTimeline({ count: 200 }, function(err, data) {
         api.next();
 
         if(err || !data) {
@@ -179,41 +146,12 @@ SearchAPI.prototype.termSearch = function(q) {
             return;
         }
 
-        var n = data.statuses.length;
+        var n = data.length;
         
-        console.log("\n\nTerm");
+        console.log("\n\nStream");
         console.log("============================================================================================");
-        console.log(q);
         console.log(n);
 
-        store(data, q.term);
-        terms.push(q);
-    });
-};
-
-SearchAPI.prototype.geoSearch = function(q) {
-    var api = this;
-
-    this.twitter.search('', { lang: 'es', count: 100, geocode: q.geocode+','+q.radius }, function(err, data) {
-        api.next();
-
-        if(err || !data) {
-            console.log(err);
-            return;
-        }
-
-        var n = data.statuses.length;
-
-        console.log("\n\nGeo");
-        console.log("============================================================================================");
-        console.log(q);
-        console.log(n);
-
-        console.log(data.statuses.map(function(t) { return t.text; }));
-        console.log(data.statuses.map(function(t) { return t.user.location; }));
-        console.log();console.log();
-    
-        store(data, q.term);
-        terms.push(q);
+        store(data);
     });
 };

@@ -1,4 +1,4 @@
- var redis = require('redis').createClient();
+var redis = require('redis').createClient();
 
 var esclient = (function() {
     var fork = true;
@@ -65,16 +65,18 @@ var es = (function() {
         .exec();
 });
 
-// Create Analysis Index
+// Create Twitter Index
 (function createTwitterIndex() {
     es.deleteIndex('twitter', createIndex);
 
     var settings = {
-        "settings": {
-            "index": {
-                "index.mapper.dynamic": false
-            }
-        }
+//        "settings": {
+//            "index": {
+//                "mapper": {
+//                    "dynamic": false
+//                }
+//            }
+//        }
     }
 
     function createIndex() {
@@ -158,6 +160,14 @@ var es = (function() {
                     "created_at": {
                         "type": "date"
                     },
+                    "term": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
+                    "urls": {
+                        "type": "string",
+                        "index": "not_analyzed"
+                    },
                     "text": {
                         "type": "multi_field",
                         "fields": {
@@ -184,10 +194,10 @@ var es = (function() {
         }
     };
 
-    es.deleteIndex('analysis', createIndex);
+    es.deleteIndex('stream2', createIndex);
 
     function createIndex() {
-        es.createIndex('analysis', settings)
+        es.createIndex('stream2', settings)
             .on('data', function(data) {
                 console.log(data);
             })
@@ -213,18 +223,23 @@ var es = (function() {
     }
 });
 
-
+// A prospect for reindexer
+// Exports data from one index|type to another
 (function exports() {
+    var count = 0;
+
     function save(data, cb) {
         var bulk = [];
         data.forEach(function(d) {
             var item = {
                 id: d._source.id_str,
                 created_at: (new Date(d._source.created_at)).toISOString(),
-                text: d._source.text
+                text: d._source.text,
+                term: d._source.term,
+                urls: d._source.entities.urls.map(function(u) { return u.expanded_url })
             };
             bulk = bulk.concat([
-                { index: { _index: 'analysis', _type: 'message', _id: item.id } },
+                { index: { _index: 'stream2', _type: 'message', _id: item.id } },
                 item
             ]);
         });
@@ -237,7 +252,7 @@ var es = (function() {
     }
 
     function scroll(scrollId) {
-        es.scroll(scrollId, '15m', function(err, data) {
+        es.scroll(scrollId, '60m', function(err, data) {
             var hits = JSON.parse(data).hits.hits;
             count += hits.length;
 
@@ -252,11 +267,11 @@ var es = (function() {
         });
     }
 
-    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '15m', size: 300 }, function(err, data) {
+    es.search('twitter', 'tweet', {}, { search_type: 'scan', scroll: '60m', size: 300 }, function(err, data) {
         var scrollId = JSON.parse(data)._scroll_id;
         scroll(scrollId);
     });
-});
+})();
 
 // Export original tweets to remote
 (function exportRawToRemote() {
@@ -317,21 +332,35 @@ var es = (function() {
     })();
 
     function doSearch(terms) {
+        var query = {
+            "query": {
+                "match_all": {}
+            },
+            "facets": {
+                "dictionary": {
+                    "terms": {
+                        "field": "term",
+                        "size": "7000"
+                    },
+                }                
+            }
+        };
+        
         var facet = {
             "query": {
                 "match_all": {}
             },
-            "filter": {
-                "terms": { "text": [ "antioquia", "medellin", "cali", "barranquilla" ] }
-            },
+//            "filter": {
+//                "terms": { "text": [ "antioquia", "medellin", "cali", "barranquilla" ] }
+//            },
             "facets" : {
                 "dictionary" : {
                     "terms" : {
-                        "field" : "text",
+                        "field" : "text.terms",
                         "all_terms": false
                     },
                     "facet_filter": {
-                        "terms": { "text": [ "antioquia", "medellin", "cali", "barranquilla" ] }
+                        "terms": { "text.terms": [ "antioquia", "medellin", "cali", "barranquilla" ] }
                     }
                 }
             }
@@ -342,22 +371,26 @@ var es = (function() {
                 "filtered": {
                     "query": { "match_all": {} },
                     "filter": {
-                        "terms": { "text": [ "bogota", "antioquia", "medellin", "cali", "barranquilla", "bucaramanga", "cucuta", "pasto", "manizales", "caldas", "santander" ] }
+                        "terms": { 
+                            "term": [ "bogota", "antioquia", "medellin", "cali", "barranquilla", "bucaramanga", "cucuta", "pasto", "manizales", "caldas", "santander" ],
+                            "execution": "bool"
+                        }
                     }
                 }
             },
             "facets": {
                 "dictionary": {
                     "terms": {
-                        "field": "text",
-                        "size": "10"
+                        "field": "term",
+                        "size": "100"
                     },
                 }                
             }
         };
 
-        es.search('test', 'message', facet, function(err, data) {
+        es.search('analysis', 'message', query, function(err, data) {
             console.log(data);
+            redis.quit();
         });
     }
 });
@@ -391,7 +424,7 @@ var es = (function() {
 // must be excluded
 (function excludeShinglesByCode() {
     var back_regex = "(\\s)(\\d+|0|1|2|3|a|c|e|i|o|q|en|yo|tu|ti|tus|ellos|nos|su|sus|por|desde|hacia|hasta|en|al|de|del|el|le|la|lo|las|los|les|con|no|y|t|que|me|para|da|san|mi|mis|un|una|te|es|esa|ese|eso|esos|esta|este|estos|estas|ya|se|como|with|of|for|gt|lt|http|to|be|the|in|on|co|at|you|it|si|ya|va|ser|hay|hacer|ve|sea|muy|ir|ver|hoy|todo|puede|ha|era|soy|vez|otro|otros|mas|sino|tras|pra|uno|cuando|sin|tal|vez|estar|pero|ah|pues|ni)$";
-    var front_regex = "^(\\d+|um|em|pra|a|e|o|yo|ya|al|y|i|de|desde|os|estos|si|se|en|es|and|of|for|my|the|to|at|this|in|is|it|on|with|han|via|con|tu|tus|te|ti|su|sus|un|una|unas|por|me|mi|mis|no|nos|que|del|you|que|este|esta|le|les|lo|mas|para|el|la|las|los|ya|estoy|eu|gt|lt|ha|he|muy|buen|buena|buenos|buenas|sino|san|santa|tras|otro|otros|uno|puede|cada|cuando|vez|ni|estar|pero|ah|pues)(\\s)";
+    var front_regex = "^(\\d+|co|um|em|pra|a|e|o|yo|ya|al|y|i|de|desde|os|estos|si|se|en|es|and|of|for|my|the|to|at|this|in|is|it|on|with|han|via|con|tu|tus|te|ti|su|sus|un|una|unas|por|me|mi|mis|no|nos|que|del|you|que|este|esta|le|les|lo|mas|para|el|la|las|los|ya|estoy|eu|gt|lt|ha|he|muy|buen|buena|buenos|buenas|sino|san|santa|tras|otro|otros|uno|puede|cada|cuando|vez|ni|estar|pero|ah|pues)(\\s)";
     var back_matcher = new RegExp(back_regex, "i");
     var front_matcher = new RegExp(front_regex, "i");
     
@@ -421,7 +454,7 @@ var es = (function() {
         shinglesQuery(doSearch);
         
         function doSearch(query) {
-            es.search('analysis', 'message', query, function(err, data) {
+            es.search('stream', 'message', query, function(err, data) {
                 var terms = JSON.parse(data).facets.blah.terms;
                 
                 var exclude_front = terms.map(function(t) {
@@ -449,4 +482,4 @@ var es = (function() {
             });
         }
     }
-})();
+});

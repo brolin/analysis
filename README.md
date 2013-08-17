@@ -1,4 +1,4 @@
-Modules
+Components
 ====================
 
 Terms Analysis
@@ -8,6 +8,8 @@ Features
 ---------------------
 
 ### monograms
+Single-word overall frequencies.
+
 Monograms are built from a terms facet:
 
 Analysis is done by es_tweetAnalyzer:
@@ -15,9 +17,11 @@ Analysis is done by es_tweetAnalyzer:
 
 
 ### bigrams
+Two-word overall frequencies.
+
 Bigrams are built from a terms facet:
 
-Analysis is done by 
+Analysis is done by shingleAnalyzer
 `https://github.com/santiago/analysis/blob/master/twitter/elasticplay.js#L126`
 
 
@@ -39,6 +43,11 @@ API
 ### POST /shingles/exclude
 
 ### DELETE /shingles/exclude
+
+WS-RPC
+---------------------
+- add_tags(term, tags)
+- delete_tags(term, tags)
 
 Elasticsearch
 ---------------------

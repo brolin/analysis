@@ -287,9 +287,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
 
         var url = "http://nominatim.openstreetmap.org/search?format=json&q="+q;
         agent.get(url, function(res) {
-            var muni = q.split('+');
-            muni.pop();
-
+            var muni = _.compact(q.split('+'));
             var places = JSON.parse(res.text);
 
             var first = places.filter(function(p) {
@@ -299,7 +297,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
                 var location = [first.lat, first.lon];
                 console.log(muni);
                 console.log(location);
-                redis.hset('municipios:location2', muni, location);
+                redis.hset('municipios:location', muni, location);
                 nextLocation();                
             } catch(e) {
                 console.log(places);
@@ -309,3 +307,83 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
     }
 
 });
+
+(function getNocheYNiebla() {
+    var departamentos,  clasificaciones, body, currentDepto, cookie, csrf;
+
+    function getByDepartamentoAndClasificaciones(clasificacion) {
+        var data = {};
+        data['evita_csrf'] = 984;
+        data['_qf_default:consultaWeb'] = 'id_departamento';
+        data['id_departamento'] = '5';
+        data['clasificacion[]'] = 'A:1:13';
+        data['critetiqueta'] = '0';
+        data['orden'] = 'fecha';
+        data['mostrar'] = 'tabla';
+        data['caso_memo'] = '1';
+        data['caso_fecha'] = '1';
+        data['m_ubicacion'] = '1';
+        data['m_victimas'] = '1';
+        data['m_presponsables'] = '1';
+        data['m_tipificacion:1'] = '1';
+        data['_qf_consultaWeb_consulta'] = 'Consulta';
+        
+        console.log('Consultando ...');
+        agent
+            .post('https://www.nocheyniebla.org/consulta_web.php')
+            .send(data)
+            .set('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8')
+            .set('Content-Type', 'application/x-www-form-urlencoded')
+            .set('Cookie', cookie)
+            .end(function(error, res){
+                var $ = cheerio.load(res.text);
+                var records = $('table tr').map(function() {
+                    var record = {};
+                    var $row = $(this);
+                    $(this).find('td').each(function(i) {
+                        var field = ['descripcion', 'fecha', 'ubicacion', 'victimas', 'responsable', 'tipificacion'][i];
+                        record[field] = $(this).text();
+                    });
+                    return record;
+                });
+                console.log(records);
+            });
+//        next();
+    }
+
+    function next() {
+        var clasificacion = clasificaciones.shift();
+        
+        if(!clasificacion) {
+            clasificaciones.push(0);
+            currentDepto = departamentos.shift();
+            next();
+            return;
+        }
+
+        getByDepartamentoAndClasificaciones(clasificacion);
+        clasificaciones.push(clasificacion);
+    }
+    
+    
+    agent.get('https://www.nocheyniebla.org/consulta_web.php', function(res) {
+        var $ = cheerio.load(res.text);
+        body = '<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>'+$('form').toString()+'</body></html>';
+
+        csrf = $('form').find('[name=evita_csrf]').attr('value');
+        cookie = (res.headers['set-cookie']);
+        
+        clasificaciones = $('form').find('[name=clasificacion\\[\\]] option').map(function() {
+            // Agregar el nombre de la localidad
+            return $(this).text().trim();
+        });
+        // Mark the head of clasificaciones. Look next()
+        clasificaciones.unshift(0);
+        
+        departamentos = $('form').find('[name=id_departamento] option').map(function() {
+            // Skip the first id: '0'
+             return $(this).text().trim();
+        });
+        next();
+    });
+})();
