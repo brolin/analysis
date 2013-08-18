@@ -211,53 +211,17 @@ var es = (function() {
         "settings": {
             "index": {
                 "analysis": {
-                    "char_filter" : {
-                        "remove_punctuation" : {
-                            "type" : "mapping",
-                            "mappings" : [ ".=>-", ",=>-", ";=>-" ]
-                        }
-                    },
-                    "filter": {
-                        "es_stop_filter": {
-                            "type": "stop",
-                            "stopwords": [ "_spanish_", "d", "q", "tal" ]
-                        },
-                        "es_stem_filter": {
-                            "type": "stemmer",
-                            "name": "minimal_portuguese"
-                        },
-                        "shingles_filter": {
-                            "type": "shingle",
-                            "output_unigrams": false
-                        }
-                    },
                     "analyzer": {
-                        "es_tweetAnalyzer": {
-                            "type": "custom",
-                            "tokenizer": "icu_tokenizer",
-                            "char_filter" : [ "remove_punctuation" ],
-                            "filter": [
-                                "icu_folding", 
-                                "icu_normalizer", 
-                                "es_stop_filter"
-                            ]
-                        },
-                        "shinglesAnalyzer": {
-                            "type": "custom",
-                            "tokenizer": "standard",
-                            "char_filter" : [ "remove_punctuation" ],
-                            "filter": [
-                                "icu_folding", 
-                                "icu_normalizer",
-                                "shingles_filter"
-                            ]
+                        "folding" : {
+                            "tokenizer" : "keyword",
+                            "filter" : ["icu_folding", "icu_normalizer"]
                         }
                     }
                 }
             }
         },
-        "reportes": {
-            "message": {
+        "mappings": {
+            "reporte": {
                 "_source": {
                     "enabled": true
                 },
@@ -296,7 +260,8 @@ var es = (function() {
                     },
                     "_ubicacion": {
                         "type": "string",
-                        "index": "not_analyzed"
+                        "index": "analyzed",
+                        "analyzer": "folding"
                     },
                     "tipificacion": {
                         "type": "string",
@@ -320,7 +285,7 @@ var es = (function() {
             })
             .exec();
     }
-});
+})();
 
 // Update Settings
 (function updateSettings() {
@@ -388,7 +353,7 @@ var es = (function() {
         var scrollId = JSON.parse(data)._scroll_id;
         scroll(scrollId);
     });
-})();
+});
 
 // Export original tweets to remote
 (function exportRawToRemote() {

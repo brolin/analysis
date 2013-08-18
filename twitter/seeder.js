@@ -1,8 +1,26 @@
+var crypto = require('crypto');
 var agent = require('superagent');
 var cheerio = require('cheerio');
 var _ = require('underscore');
 var fs = require('fs');
-var utils   = require('../../crawler_engine/lib/utils');
+
+var esclient = (function() {
+    var fork = true;
+    if(fork) {
+        return require('/Projects/node-elasticsearch-client');
+    }
+    return require('elasticsearchclient');
+})();
+
+// Initialize ES
+var es = (function() {
+    var opts = {
+        host: 'localhost',
+        port: 9200
+    };
+
+    return new (esclient)(opts);
+})();
 
 var redis = require('redis').createClient();
 
@@ -311,30 +329,34 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
 (function getNocheYNiebla() {
     var departamentos,  clasificaciones, body, currentDepto, cookie, csrf;
 
-    function store(records) {
+    function store(records, cb) {
         var bulk = [];
-
+        console.log(records.length);
         // Store reports in ES
         records.forEach(function(reporte) {
+            var shasum = crypto.createHash('sha1');
+            shasum.update(reporte.victimas);
+            var _id = shasum.digest('hex');
+
             bulk = bulk.concat([
-                { index: { _index: 'nocheyniebla', _type: 'reporte', _id: +'' } },
+                { index: { _index: 'nocheyniebla', _type: 'reporte', _id: _id } },
                 reporte
             ]);
         });
 
         if(bulk.length) {
-            es.bulk(bulk, function(err, res) {
-                // console.log(res);
-            });            
+            es.bulk(bulk, cb);            
+        } else {
+            cb();
         }
     };
 
     function getByDepartamentoAndClasificaciones(clasificacion) {
         var data = {};
-        data['evita_csrf'] = 984;
+        data['evita_csrf'] = csrf;
         data['_qf_default:consultaWeb'] = 'id_departamento';
-        data['id_departamento'] = '5';
-        data['clasificacion[]'] = 'A:1:13';
+        data['id_departamento'] = currentDepto;
+        data['clasificacion[]'] = clasificacion;
         data['critetiqueta'] = '0';
         data['orden'] = 'fecha';
         data['mostrar'] = 'tabla';
@@ -347,6 +369,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         data['_qf_consultaWeb_consulta'] = 'Consulta';
         
         console.log('Consultando ...');
+        console.log('Departameto: '+currentDepto+' - Tipificacion: '+clasificacion);
         agent
             .post('https://www.nocheyniebla.org/consulta_web.php')
             .send(data)
@@ -386,8 +409,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
                 });
                 // The first row is the table's header
                 records.shift();
-                store(records/*, next*/);
-            
+                store(records, next);            
             });
     }
 
@@ -395,12 +417,15 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         if(err) {
             console.log(err);
         }
-        
+
         var clasificacion = clasificaciones.shift();
-        
+
         if(!clasificacion) {
             clasificaciones.push(0);
             currentDepto = departamentos.shift();
+            if(currentDepto == '5') {
+                currentDepto = departamentos.shift();
+            }
             next();
             return;
         }
@@ -408,26 +433,24 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         getByDepartamentoAndClasificaciones(clasificacion);
         clasificaciones.push(clasificacion);
     }
-    
-    
+
     agent.get('https://www.nocheyniebla.org/consulta_web.php', function(res) {
         var $ = cheerio.load(res.text);
         body = '<html xmlns="http://www.w3.org/1999/xhtml"><head></head><body>'+$('form').toString()+'</body></html>';
 
         csrf = $('form').find('[name=evita_csrf]').attr('value');
         cookie = (res.headers['set-cookie']);
-        
+
         clasificaciones = $('form').find('[name=clasificacion\\[\\]] option').map(function() {
-            // Agregar el nombre de la localidad
-            return $(this).text().trim();
+            return $(this).attr('value').trim();
         });
         // Mark the head of clasificaciones. Look next()
         clasificaciones.unshift(0);
         
         departamentos = $('form').find('[name=id_departamento] option').map(function() {
-            // Skip the first id: '0'
-             return $(this).text().trim();
+             return $(this).attr('value').trim();
         });
+        departamentos = _.compact(departamentos);
         next();
     });
 })();
