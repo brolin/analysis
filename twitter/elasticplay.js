@@ -1,4 +1,5 @@
 var redis = require('redis').createClient();
+var _ = require('underscore');
 
 var esclient = (function() {
     var fork = true;
@@ -206,7 +207,7 @@ var es = (function() {
 });
 
 // Create NieblaYNoche Index
-(function createAnalysisIndex() {
+(function createNyNIndex() {
     var settings = {
         "settings": {
             "index": {
@@ -260,8 +261,7 @@ var es = (function() {
                     },
                     "_ubicacion": {
                         "type": "string",
-                        "index": "analyzed",
-                        "analyzer": "folding"
+                        "index": "not_analyzed"
                     },
                     "tipificacion": {
                         "type": "string",
@@ -285,7 +285,166 @@ var es = (function() {
             })
             .exec();
     }
+});
+
+// Update mapping
+(function addCasoMappingToNyN() {
+    var mapping = {
+        "caso" : {
+            "_source": {
+                "enabled": true
+            },
+            "_all": {
+                "enabled": false
+            },
+            "index.query.default_field": "descripcion",
+            
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "descripcion": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "fecha": {
+                    "type": "date"
+                },
+                "victimas": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "responsable": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "_responsable": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "ubicacion": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "_ubicacion": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "tipificacion": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "_tipificacion": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                },
+                "departamento": {
+                    "type": "string",
+                    "index": "not_analyzed"
+                }
+            }
+        }
+    };
+    
+    es.putMapping('nocheyniebla', 'caso', mapping, function() {
+        console.log('updated mapping!');
+    });
+});
+
+// Fix ubicacion for casos in NocheYNiebla
+(function fixUbicaciones() {
+    redis.hgetall('nocheyniebla:ubicacion:casos:ok', function(err, data) {
+        var ubicaciones = Object.keys(data);
+        var casos = {}
+
+        ubicaciones.forEach(function(u) {
+            var depto = u.split(',').pop();
+            data[u].split(',').forEach(function(caso) {
+                casos[caso] = casos[caso] || { ubicacion: [], depto: [] };
+                casos[caso].ubicacion.push(u);
+                casos[caso].depto.push(depto);
+                
+                casos[caso].ubicacion = _.uniq(casos[caso].ubicacion);
+                casos[caso].depto = _.uniq(casos[caso].depto);
+            });
+        });
+
+        var _casos = Object.keys(casos);
+        console.log(_casos.length);
+        //doUpdate();
+        function doUpdate() {
+            var bulk = [];
+            var _updt = _casos.splice(0, 250);
+            _updt.forEach(function(caso) {
+                bulk.push({ "update" : {"_id" : caso, "_type" : "caso", "_index" : "nocheyniebla"} });
+                bulk.push({ "doc" : { "_ubicacion" : casos[caso].ubicacion, "departamento": casos[caso].depto } });
+            });
+//            console.log(casos);
+//            console.log('\n================================\n');
+    
+//            es.bulk(bulk, function(err, res) {
+//                if(data.length)
+            setTimeout(function() {
+                if(!ubicaciones.length) {
+                    console.log('done');
+                    redis.quit();
+                } else {
+                    doUpdate();
+                }
+            }, 100);
+                    
+//            });
+        }
+    });
 })();
+
+// Export 'reporte' to 'caso'
+(function exportReporteToCaso() {
+    var count = 0;
+
+    function save(data, cb) {
+        var bulk = [];
+        data.forEach(function(d) {
+            var item = d._source;
+            item.id = d._id;
+            item._ubicacion = '';
+            bulk = bulk.concat([
+                { index: { _index: 'nocheyniebla', _type: 'caso', _id: d._id } },
+                item
+            ]);
+        });
+
+        if(bulk.length) {
+            es.bulk(bulk, function(err, res) {
+                cb();
+            });            
+        }        
+    }
+    
+    function scroll(scrollId) {
+        es.scroll(scrollId, '60m', function(err, data) {
+            var hits = JSON.parse(data).hits.hits;
+            count += hits.length;
+
+            if(hits.length) {
+                save(hits, function() {
+                    scroll(scrollId);
+                });                
+            }
+            else {
+                console.log("TOTAL HITS: "+count);
+            }
+        });
+    }
+
+    es.search('nocheyniebla', 'reporte', {}, { search_type: 'scan', scroll: '60m', size: 300 }, function(err, data) {
+        var scrollId = JSON.parse(data)._scroll_id;
+        scroll(scrollId);
+    });
+});
+
+
 
 // Update Settings
 (function updateSettings() {
@@ -565,3 +724,60 @@ var es = (function() {
         }
     }
 });
+
+(function bulkFieldUpdate(_index, _type) {
+    var count = 0;
+
+    setInterval(function() {
+        console.log("COUNT: "+count)
+    }, 60000)
+
+    function save(data, cb) {
+        var bulk = [];
+        data.forEach(function(d) {
+            var item = d._source;
+            var _ubicacion = item.ubicacion.split(';')
+                .map(function(t) { return t.trim() })
+                .map(function(t) { return t.split('/') })
+                .map(function(t) { 
+                    t = t.map(function(u) { return u.trim() });
+                    t = t.reverse();
+                    return t.join(',').toLowerCase();
+                });
+//            console.log(_ubicacion);
+            bulk = bulk.concat([
+                { update: { _index: _index, _type: _type, _id: d._id } },
+                { doc: { '_ubicacion': _ubicacion } }
+            ]);
+        });
+//        console.log(bulk);
+
+        if(bulk.length) {
+            es.bulk(bulk, function(err, res) {
+                cb();
+            });   
+        }
+    }
+
+    function scroll(scrollId) {
+        es.scroll(scrollId, '30m', function(err, data) {
+            var hits = JSON.parse(data).hits.hits;
+            count += hits.length;
+
+            if(hits.length) {
+                save(hits, function() {
+                    scroll(scrollId);
+                });                
+            }
+            else {
+                console.log("TOTAL HITS: "+count);
+            }
+        });
+    }
+
+    es.search(_index, _type, {}, { search_type: 'scan', scroll: '30m', size: 300 }, function(err, data) {
+        var scrollId = JSON.parse(data)._scroll_id;
+        scroll(scrollId);
+    });
+})/*('nocheyniebla', 'reporte')*/;
+

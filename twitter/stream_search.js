@@ -112,8 +112,7 @@ function store(data, q) {
             message
         ]);
 
-        // Store entities in redis
-//        storeEntities(item.entities);
+ //        storeEntities(item.entities);
     });
     
     if(bulk.length) {

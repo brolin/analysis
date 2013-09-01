@@ -3,6 +3,7 @@ var agent = require('superagent');
 var cheerio = require('cheerio');
 var _ = require('underscore');
 var fs = require('fs');
+var Iconv = require('iconv').Iconv;
 
 var esclient = (function() {
     var fork = true;
@@ -377,7 +378,8 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
             .set('Content-Type', 'application/x-www-form-urlencoded')
             .set('Cookie', cookie)
             .end(function(error, res){
-                var $ = cheerio.load(res.text);
+                var iconv = new Iconv('latin1', 'utf-8');
+                var $ = cheerio.load(iconv.convert(res.text).toString());
                 var records = $('table tr').map(function MapHTMLTable() {
                     var record = {};
                     var $row = $(this);
@@ -393,6 +395,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
                                 var _m = record[field].split('/').map(function(t) { 
                                     return t.toLowerCase().trim();
                                 });
+                                console.log(_m);
                                 _m.splice(2);
                                 _m.reverse();
                                 return _m.join(',');
@@ -423,13 +426,12 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         if(!clasificacion) {
             clasificaciones.push(0);
             currentDepto = departamentos.shift();
-            if(currentDepto == '5') {
-                currentDepto = departamentos.shift();
-            }
             next();
             return;
         }
-
+        
+        currentDepto = currentDepto || departamentos.shift();
+        
         getByDepartamentoAndClasificaciones(clasificacion);
         clasificaciones.push(clasificacion);
     }
@@ -444,13 +446,65 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
         clasificaciones = $('form').find('[name=clasificacion\\[\\]] option').map(function() {
             return $(this).attr('value').trim();
         });
-        // Mark the head of clasificaciones. Look next()
-        clasificaciones.unshift(0);
         
         departamentos = $('form').find('[name=id_departamento] option').map(function() {
              return $(this).attr('value').trim();
         });
         departamentos = _.compact(departamentos);
+
+        var deptoIndex = departamentos.indexOf('66');
+        var tipifIndex = clasificaciones.indexOf('D:1:88');
+
+        departamentos.splice(0, deptoIndex);
+        clasificaciones.unshift(0);
+        clasificaciones = clasificaciones.concat(clasificaciones.splice(0, tipifIndex));
+        
+        // Mark the head of clasificaciones. Look next()
         next();
+    });
+});
+
+(function getNocheYNieblaLocations() {
+    var ubicaciones = [];
+
+    function nextLocation() {
+        var q = ubicaciones.shift();
+        q += ",colombia";
+        console.log(q);
+        if(!q) {
+            redis.quit();
+            return;
+        }
+
+        var url = "http://nominatim.openstreetmap.org/search?format=json&q="+q;
+        agent.get(url, function(res) {
+            var muni = _.compact(q.split('+'));
+            console.log(muni);
+            var places = JSON.parse(res.text);
+
+            var city = places.filter(function(p) {
+                return p.type.toLowerCase() == 'city';
+            }).shift();
+            
+            var town = places.filter(function(p) {
+                return p.type.toLowerCase() == 'town';
+            }).shift();
+            
+            var first = city || town || places.shift();
+            try {
+                var location = [first.lat, first.lon];
+                nextLocation();                
+            } catch(e) {
+                var location = '';
+                nextLocation();
+            }
+            console.log(location);
+            redis.hset('nocheyniebla:ubicaciones:geo', muni, location);
+        });
+    }
+    
+    redis.hkeys('nocheyniebla:ubicacion:casos:ok', function(err, data) {
+        ubicaciones = data;
+        nextLocation();
     });
 })();
