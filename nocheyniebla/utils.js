@@ -60,7 +60,7 @@ var es = (function() {
     });
 });
 
-(function contarCasosFaltantes() {
+(function agregarCasosFaltantes() {
     var casos1 = {};
     var casos2 = {};
     
@@ -93,16 +93,17 @@ var es = (function() {
             getDifference();
         });
     }
-    
+
     function getDifference() {
         var diff = _.difference(Object.keys(casos2), Object.keys(casos1));
+        console.log(diff);
         var ubicaciones = {};
         diff.forEach(function(caso) {
             var u = casos2[caso];
             ubicaciones[u] = ubicaciones[u] || [];
             ubicaciones[u].push(caso); 
         });
-        redis.hmset('nocheyniebla:ubicacion:casos', ubicaciones, end);
+//        redis.hmset('nocheyniebla:ubicacion:casos', ubicaciones, end);
     }
     
     function end() {
@@ -110,6 +111,50 @@ var es = (function() {
     }
 });
 
-(function agregarCasosFaltantes() {
-    
-});
+(function actualizarUbicaciones() {
+
+    var count = 0;
+
+    setInterval(function() {
+        console.log("COUNT: "+count)
+    }, 60000)
+
+    redis.hgetall('nocheyniebla:ubicacion:casos:ok', function(err, data) {
+        var ubicaciones = Object.keys(data);
+        var casos = {}
+
+        ubicaciones.forEach(function(u) {
+            var depto = u.split(',').pop();
+            data[u].split(',').forEach(function(caso) {
+                casos[caso] = casos[caso] || { ubicacion: [], depto: [] };
+                casos[caso].ubicacion.push(u);
+                casos[caso].depto.push(depto);
+                
+                casos[caso].ubicacion = _.uniq(casos[caso].ubicacion);
+                casos[caso].depto = _.uniq(casos[caso].depto);
+            });
+        });
+
+        var _casos = Object.keys(casos);
+        doUpdate();
+        function doUpdate() {
+            if(!_casos.length) {
+                console.log('done');
+                redis.quit();
+                return;
+            }
+            
+            var bulk = [];
+            var _updt = _casos.splice(0, 250);
+
+            _updt.forEach(function(caso) {
+                bulk.push({ "update" : { "_id" : caso, "_type" : "caso", "_index" : "nocheyniebla" } });
+                bulk.push({ "doc" : { "_ubicacion" : casos[caso].ubicacion, "departamento": casos[caso].depto } });
+            });
+
+            es.bulk(bulk, function(err, res) {
+                doUpdate();
+            });
+        }
+    });
+})();

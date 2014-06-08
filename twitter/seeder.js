@@ -3,7 +3,6 @@ var agent = require('superagent');
 var cheerio = require('cheerio');
 var _ = require('underscore');
 var fs = require('fs');
-var Iconv = require('iconv').Iconv;
 
 var esclient = (function() {
     var fork = true;
@@ -378,8 +377,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
             .set('Content-Type', 'application/x-www-form-urlencoded')
             .set('Cookie', cookie)
             .end(function(error, res){
-                var iconv = new Iconv('latin1', 'utf-8');
-                var $ = cheerio.load(iconv.convert(res.text).toString());
+                var $ = cheerio.load(res.text);
                 var records = $('table tr').map(function MapHTMLTable() {
                     var record = {};
                     var $row = $(this);
@@ -470,7 +468,7 @@ var departamentos = [], municipios = [], barriosBogota = [], dictionary = [];
     function nextLocation() {
         var q = ubicaciones.shift();
         q += ",colombia";
-        console.log(q);
+//        console.log(q);
         if(!q) {
             redis.quit();
             return;
