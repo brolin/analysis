@@ -1,3 +1,4 @@
+var resque = require('coffee-resque').connect({ host: 'cos' });
 var $a = require('async');
 var fs = require('fs');
 
@@ -10,14 +11,16 @@ $a.waterfall([
 
 function filterFiles(files, cb) {
   files = files.filter(function(f) {
-    return f.split('.').pop().pop() === 'worker';
+    return f.split('.').splice(-2, 1) === 'worker';
   });
   return cb(null, files);
 }
 
-function startWorkers(workers, cb) {
-  $a.each(workers, function(name) {
-    var worker = WorkerFactory.create({ name: name });
-    worker.run();
+function startWorkers(files, cb) {
+  $a.each(files, function(name) {
+    var jobs = require('./'+name);
+    var worker = resque.worker(name, jobs);
+    console.log('Starting '+name);
+    worker.start();
   });
 }

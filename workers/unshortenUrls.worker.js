@@ -1,11 +1,9 @@
 var $a = require('async');
 var request = require('superagent');
 var redis = require('redis').createClient();
+var noop = function() {};
 
-/*var WorkerBase = require('worker-base');
-var worker = new WorkerBase();
-worker.addJob('unshortenUrls', unshorten);
-module.exports = worker;*/
+module.exports = { 'unshortenUrls': unshorten };
 
 function unshorten(urls, callback) {
   if(!urls || !urls.length) { return callback(); }
@@ -19,8 +17,7 @@ function unshorten(urls, callback) {
     urls.forEach(function(url, i) {
       urlData[url] = JSON.stringify(_urls[i]);
     });
-    redis.hmset('colombia-analiza:urls', urlData, function() {});
-    return callback();
+    return callback(urlData);
   });
 }
 
@@ -30,17 +27,21 @@ function qs(params) {
 
 function resolveUrl(url, urlExists, cb) {
   if(urlExists) { return cb(null, urlExists); }
-
-  url = encodeURIComponent(url);
-
   var params = {
     'title': 1,
     'meta-keywords': 1,
     'meta-description': 1,
     'format': 'json'
   };
-  url = 'http://api.longurl.org/v2/expand?url='+url+'&'+qs(params);
-  request.get(url, function(err, res) {
+
+  var service = 'http://api.longurl.org/v2/expand?url=';
+  service += encodeURIComponent(url)+'&'+qs(params);
+
+  request.get(service, function(err, res) {
+    // console.log('got '+url);
+    // console.log(res.body);
+    // console.log();
+    redis.hset('colombia-analiza:urls', url, JSON.stringify(res.body), noop);
     cb(null, res.body);
   });
 }
@@ -51,6 +52,7 @@ function urlExists(url, cb) {
   });
 }
 
-unshorten(['http://t.co/U12Ze5vzoT', 'http://bit.ly/1nnkq16', 'http://t.co/ogTE33fBG8', 'http://t.co/QRITc0J5zF'], function() {
-
-});
+// Usage
+/*unshorten(['http://t.co/WGzjCR09qo', 'http://t.co/DtLQmlKfA9', 'http://t.co/h9kNpzww35', 'http://t.co/MrynH88bDo', 'http://t.co/wWHBXN2Twi', 'http://t.co/1bX30N2X7Y'], function(data) {
+ console.log(data);
+});*/

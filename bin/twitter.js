@@ -1,13 +1,4 @@
-/*
- *  search.js
- *  Search out our dictionary on Twitter
- */
-
-var resque = require('coffee-resque').connect({
-  host: 'cos',
-  port: 6379
-});
-
+var emit = require('../lib/emit');
 var twitter = require('ntwitter');
 
 var accounts = [{
@@ -55,13 +46,18 @@ function getHomeTimeline() {
     log(n);
 
     // Index tweet in ES
-    resque.enqueue('indexing', 'indexing', [data]);
+    emit('indexing', [data]);
 
     // Unshorten URLs
     var urls = ((data.entities||{}).urls||[]).map(function(url) { return url.url; });
-    resque.enqueue('unshortenUrls', 'unshortenUrls', [urls]);
+    emit('unshortenUrls', [urls]);
+
+    // Scrape URLs
+    emit('scrapeUrls', [urls])
+      .next('indexUrl')
+      .next('indexOpenCalais');
 
     // Store to Graph DBs (Giraph, neo4j)
-    resque.enqueue('storeGraph', 'storeGraph', [data]);
+    // resque.enqueue('storeGraph', 'storeGraph', [data]);
   });
 }

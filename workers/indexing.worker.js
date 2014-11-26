@@ -3,12 +3,9 @@ var es = new elasticsearch.Client({
   host: 'localhost:9200'/*,
   log: 'trace'*/
 });
+var resolve = require('../lib/resolve');
 
-var WorkerBase = require('worker-base');
-var worker = new WorkerBase();
-worker.addJob('indexing', store);
-
-module.exports = worker;
+module.exports = { 'indexing': store };
 
 function storeEntities(entities) {
   var bulk = [];
@@ -81,7 +78,7 @@ function store(data, q) {
         return u.url;
       })
     };
-//    console.log(message);
+
     bulk = bulk.concat([{
       index: {
         _index: 'stream',
@@ -97,6 +94,7 @@ function store(data, q) {
   if (bulk.length) {
     es.bulk({ body: bulk }, function(err, res) {
       // console.log(res);
+      resolve('indexed');
     });
   }
 }

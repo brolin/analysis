@@ -1,5 +1,3 @@
-var resque = require('coffee-resque').connect();
-
 function validate(opts) {
   var invalid = null;
 
@@ -46,8 +44,7 @@ var WorkerFactory = {
     try {
       var worker = new WorkerBase({ name: opts.name });
       var workerService = require(__dirname+'/../'+workers+'/'+opts.name);
-      worker.setService(workerService);
-      return
+      return worker;
     } catch(e) {
       console.error('There is no worker named '+opts.name);
     }
